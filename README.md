@@ -47,8 +47,8 @@ dsh plugin --profile web add "link:$PWD"
 客户端通过 SSE（`/dsh-notifier/events`）接收通知，并上报浏览器通知权限与当前正在浏览的会话。Host 的
 `windowsToast.enabled` 决定是否同时弹 Windows Toast：
 
-- `auto`（默认）：有页面已授予通知权限时只发浏览器通知，避免重复；没有可用页面时回退到 Windows Toast。
-- `always`：每条通知同时弹 Windows Toast，最可靠，但会与浏览器通知重复。
+- `auto`（默认）：有页面已授予通知权限时只发浏览器通知，避免重复；没有可用页面时回退到 Windows Toast。关闭浏览器通道（`browser.enabled: false`）时视同 `always`，只弹 Toast。
+- `always`：每条未被关注会话抑制的通知同时弹 Windows Toast，最可靠，但会与浏览器通知重复。
 - `never`：从不弹 Toast。
 
 **被关注会话**：同时只看一个页面、一个会话。聚焦且可见的页面上报的当前会话即被关注会话。
@@ -88,6 +88,8 @@ dsh plugin --profile web add "link:$PWD"
       # launchUrl: http://127.0.0.1:3080/
     browser:
       enabled: true
+    # 额外允许访问通知路由的主机名（反向代理场景）；绑定地址与本机地址始终放行
+    allowedHosts: []
     debounceMs: 4000
     includeSubagents: false   # true 时子代理/子会话也通知
 ```
@@ -116,7 +118,7 @@ curl -sN 'http://127.0.0.1:3080/dsh-notifier/events?client=probe'
 ## 已知限制
 
 - **需要浏览器进程在运行才能收到浏览器通知**；页面全部关掉后由 Windows Toast 接管（仅 Windows/WSL）。
-- SSE 路由只校验回环 Host/Origin，没有额外鉴权；DSH Web 只监听 `127.0.0.1` 时风险可接受。
+- 通知路由只接受本机（`127.0.0.1` / `localhost` / `::1`）、`dsh web` 实际绑定的地址，以及 `allowedHosts` 里显式列出的主机；经 `--public-url` 反向代理访问时，要把代理域名加入 `allowedHosts`。路由没有额外鉴权，不要把端点暴露到不受信任的网络。
 - Windows Toast 使用 `DSH.Web` 作为 AppID，插件首次发送时会在 `HKCU\SOFTWARE\Classes\AppUserModelId\DSH.Web` 写入显示名 `DSH Web`（用户级注册表，幂等，不需要管理员权限）。想换名称可改配置里的 `appId`。
 - Toast 点击会新开一个浏览器标签页并直接定位到对应会话（`?dsh-session=<id>`）。Windows 协议激活无法聚焦已经打开的标签页，这是平台限制；浏览器通知的点击则优先聚焦已有标签页。
 - 审批/提问通知依赖 Host 的 `approval/request`、`user-questions/request` 事件；在审批策略为 `never` 时不会触发审批通知。

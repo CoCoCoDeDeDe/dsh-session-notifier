@@ -14,7 +14,6 @@ window.__ModuleLoader__.load({
     const { useReducer, useEffect } = React
 
     const NS = 'dsh-notifier'
-    const CLIENT_ID_KEY = 'dsh-notifier-client'
 
     const zh = {
       'settings.title': '桌面通知',
@@ -76,19 +75,13 @@ window.__ModuleLoader__.load({
 
     function clientId() {
       if (cachedClientId) return cachedClientId
-      try {
-        let value = window.sessionStorage.getItem(CLIENT_ID_KEY)
-        if (!value) {
-          value =
-            typeof crypto !== 'undefined' && crypto.randomUUID
-              ? crypto.randomUUID()
-              : `${Date.now()}-${Math.random().toString(36).slice(2)}`
-          window.sessionStorage.setItem(CLIENT_ID_KEY, value)
-        }
-        cachedClientId = value
-      } catch {
-        cachedClientId = `anon-${Math.random().toString(36).slice(2)}`
-      }
+      // One id per page load, never shared across tabs: duplicating a tab copies
+      // sessionStorage, and two tabs sharing one id would evict each other's SSE
+      // connection in a reconnect loop.
+      cachedClientId =
+        typeof crypto !== 'undefined' && crypto.randomUUID
+          ? crypto.randomUUID()
+          : `anon-${Date.now()}-${Math.random().toString(36).slice(2)}`
       return cachedClientId
     }
 
@@ -276,7 +269,7 @@ window.__ModuleLoader__.load({
       if (permission() === 'default') await requestPermission()
       if (permission() !== 'granted') return
       const posted = await postJson('/dsh-notifier/test', {})
-      if (!posted) {
+      if (!posted || !posted.ok) {
         // The Host could not be reached; still prove the browser channel works.
         showNotification(
           {
@@ -437,9 +430,14 @@ window.__ModuleLoader__.load({
           const onVisibility = () => reportState()
           document.addEventListener('visibilitychange', onVisibility)
           window.addEventListener('focus', onVisibility)
+          // A window that loses focus without being hidden (another desktop app
+          // covering it) must stop counting as attended, or completions in the
+          // session on screen stay suppressed until the next heartbeat.
+          window.addEventListener('blur', onVisibility)
           return () => {
             document.removeEventListener('visibilitychange', onVisibility)
             window.removeEventListener('focus', onVisibility)
+            window.removeEventListener('blur', onVisibility)
           }
         }, 'dsh-notifier: visibility reporting')
 

@@ -48,6 +48,11 @@ function normalizeConfig(raw) {
       question: events.question !== false,
     },
     browser: { enabled: browser.enabled !== false },
+    allowedHosts: Array.isArray(c.allowedHosts)
+      ? c.allowedHosts
+          .filter((host) => typeof host === 'string' && host)
+          .map((host) => String(host).toLowerCase())
+      : [],
     windowsToast: {
       enabled: toastMode,
       command: typeof toast.command === 'string' && toast.command ? toast.command : 'powershell.exe',
@@ -181,7 +186,7 @@ function readJson(req, limit = 8192) {
 
 export function apply(ctx, rawConfig) {
   const config = normalizeConfig(rawConfig)
-  /** @type {Map<string, { res: import('node:http').ServerResponse, permission: string, visible: boolean, seenAt: number }>} */
+  /** @type {Map<string, { res?: import('node:http').ServerResponse, permission: string, visible: boolean, focused: boolean, currentSessionId?: string, seenAt: number }>} */
   const clients = new Map()
   const running = new Set()
   const recentErrorAt = new Map()
@@ -198,27 +203,45 @@ export function apply(ctx, rawConfig) {
     }
   }
 
-  /** Only loopback page origins may read the notification stream. */
+  /**
+   * Host authorities allowed to use the notifier routes: loopback, the address
+   * the web server actually bound (a profile started with `--host <LAN IP>` is
+   * reachable there), and any `allowedHosts` entry for a reversing proxy.
+   */
+  function hostAllowed(hostname) {
+    const value = String(hostname || '').toLowerCase()
+    if (!value) return false
+    if (
+      value === '127.0.0.1' ||
+      value === 'localhost' ||
+      value === '[::1]' ||
+      value === '::1'
+    ) {
+      return true
+    }
+    try {
+      if (value === new URL(origin()).hostname.toLowerCase()) return true
+    } catch {
+      // Before the listener binds, only loopback is known.
+    }
+    for (const allowed of config.allowedHosts) {
+      const entry = allowed.startsWith('[')
+        ? allowed.replace(/\]:\d+$/, ']')
+        : allowed.replace(/:\d+$/, '')
+      if (value === entry) return true
+    }
+    return false
+  }
+
+  /** Only a page origin this Host itself serves may use the notifier routes. */
   function trusted(req) {
     if (req.headers['sec-fetch-site'] === 'cross-site') return false
-    const host = String(req.headers.host || '').toLowerCase()
-    const hostname = host.replace(/:\d+$/, '')
-    const loopback =
-      hostname === '127.0.0.1' ||
-      hostname === 'localhost' ||
-      hostname === '[::1]' ||
-      hostname === '::1'
-    if (!loopback) return false
+    const hostname = String(req.headers.host || '').replace(/:\d+$/, '')
+    if (!hostAllowed(hostname)) return false
     const requestOrigin = typeof req.headers.origin === 'string' ? req.headers.origin : ''
     if (!requestOrigin) return true
     try {
-      const parsed = new URL(requestOrigin)
-      return (
-        parsed.hostname === '127.0.0.1' ||
-        parsed.hostname === 'localhost' ||
-        parsed.hostname === '::1' ||
-        parsed.hostname === '[::1]'
-      )
+      return hostAllowed(new URL(requestOrigin).hostname)
     } catch {
       return false
     }
@@ -228,6 +251,7 @@ export function apply(ctx, rawConfig) {
     if (config.browser.enabled === false) return
     const frame = `event: notification\ndata: ${JSON.stringify(notice)}\n\n`
     for (const client of clients.values()) {
+      if (!client.res) continue
       try {
         client.res.write(frame)
       } catch {
@@ -266,6 +290,10 @@ export function apply(ctx, rawConfig) {
     if (mode === 'never') return false
     if (kind === 'test') return true
     if (mode === 'always') return true
+    // `auto` keeps the browser channel primary, but only while that channel is
+    // actually on; a page that merely holds notification permission must not
+    // suppress the toast when browser notifications are disabled.
+    if (config.browser.enabled === false) return true
     return !browserChannelAvailable()
   }
 
@@ -471,8 +499,20 @@ export function apply(ctx, rawConfig) {
 
   function updateClientState(body) {
     if (!body || typeof body.client !== 'string') return
-    const client = clients.get(body.client)
-    if (!client) return
+    let client = clients.get(body.client)
+    if (!client) {
+      // A page reports before its EventSource handshake completes; keeping the
+      // row lets the first completion decide suppression and toast correctly.
+      client = {
+        res: undefined,
+        permission: 'unknown',
+        visible: false,
+        focused: false,
+        currentSessionId: undefined,
+        seenAt: Date.now(),
+      }
+      clients.set(body.client, client)
+    }
     const permission = body.permission
     if (permission === 'granted' || permission === 'denied' || permission === 'default') {
       client.permission = permission
@@ -497,7 +537,7 @@ export function apply(ctx, rawConfig) {
     res.write('retry: 3000\n\n')
     res.write(`event: hello\ndata: ${JSON.stringify({ clientId, ts: Date.now() })}\n\n`)
     const previous = clients.get(clientId)
-    if (previous) {
+    if (previous && previous.res) {
       try {
         previous.res.end()
       } catch {
@@ -622,7 +662,22 @@ export function apply(ctx, rawConfig) {
       },
     })
     const heartbeat = setInterval(() => {
-      for (const client of clients.values()) {
+      const now = Date.now()
+      for (const [id, client] of clients) {
+        if (now - client.seenAt > CLIENT_STALE_MS) {
+          // A page that stopped reporting is gone even when its socket lingers,
+          // and an early state report can leave a row with no socket at all.
+          if (client.res) {
+            try {
+              client.res.end()
+            } catch {
+              // Already closed.
+            }
+          }
+          clients.delete(id)
+          continue
+        }
+        if (!client.res) continue
         try {
           client.res.write(': ping\n\n')
         } catch {
@@ -635,6 +690,7 @@ export function apply(ctx, rawConfig) {
       clearInterval(heartbeat)
       disposeRoute()
       for (const client of clients.values()) {
+        if (!client.res) continue
         try {
           client.res.end()
         } catch {
