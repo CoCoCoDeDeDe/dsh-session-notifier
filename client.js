@@ -56,6 +56,15 @@ window.__ModuleLoader__.load({
 `
 
     let cachedClientId
+    // Capture the deep-link parameter at module load, before the shell rewrites
+    // the URL; the workspace service is not ready yet at this point.
+    let pendingSessionId
+    try {
+      const initial = new URL(window.location.href)
+      pendingSessionId = initial.searchParams.get('dsh-session') || undefined
+    } catch {
+      pendingSessionId = undefined
+    }
     const state = {
       ctx: null,
       t: (key) => key,
@@ -189,28 +198,34 @@ window.__ModuleLoader__.load({
      * parameter so a refresh stays on the current view.
      */
     function openSessionFromUrl() {
-      let sessionId
+      const sessionId = pendingSessionId
+      if (!sessionId) return
+      pendingSessionId = undefined
       try {
         const url = new URL(window.location.href)
-        sessionId = url.searchParams.get('dsh-session')
-        if (!sessionId) return
-        url.searchParams.delete('dsh-session')
-        window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
+        if (url.searchParams.has('dsh-session')) {
+          url.searchParams.delete('dsh-session')
+          window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
+        }
       } catch {
-        return
+        // The parameter is already tracked in memory.
       }
-      const attempt = (remaining) => {
-        if (!state.ctx || !state.ctx.uiWorkspace) {
-          if (remaining > 0) window.setTimeout(() => attempt(remaining - 1), 100)
-          return
+      let attempts = 0
+      const tryOpen = () => {
+        attempts += 1
+        // The shell restores the previously selected session asynchronously;
+        // re-assert the requested session until it is the one on screen.
+        if (state.currentSessionId === sessionId) return
+        if (state.ctx && state.ctx.uiWorkspace) {
+          try {
+            state.ctx.uiWorkspace.openSession(sessionId)
+          } catch {
+            // A stale or pruned session simply stays on the current view.
+          }
         }
-        try {
-          state.ctx.uiWorkspace.openSession(sessionId)
-        } catch {
-          // A stale or pruned session simply stays on the current view.
-        }
+        if (attempts < 10) window.setTimeout(tryOpen, 250)
       }
-      window.setTimeout(() => attempt(20), 0)
+      window.setTimeout(tryOpen, 300)
     }
 
     function showNotification(notice, force) {
