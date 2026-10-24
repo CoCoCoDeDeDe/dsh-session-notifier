@@ -26,6 +26,8 @@ window.__ModuleLoader__.load({
       'settings.description.unsupported': '当前浏览器不支持桌面通知。',
       'settings.enable': '启用通知',
       'settings.test': '发送测试通知',
+      'settings.channel.online': '通知通道已连接',
+      'settings.channel.offline': '通知通道已断开，正在重连…',
       'notify.testTitle': 'DSH 通知测试',
       'notify.testBody': '通知通道工作正常。',
     }
@@ -41,6 +43,8 @@ window.__ModuleLoader__.load({
       'settings.description.unsupported': 'This browser does not support desktop notifications.',
       'settings.enable': 'Enable notifications',
       'settings.test': 'Send test notification',
+      'settings.channel.online': 'Notification channel connected',
+      'settings.channel.offline': 'Notification channel disconnected; reconnecting…',
       'notify.testTitle': 'DSH notification test',
       'notify.testBody': 'The notification channel works.',
     }
@@ -50,6 +54,8 @@ window.__ModuleLoader__.load({
 .dsh-notifier-text{min-width:0}
 .dsh-notifier-title{font-size:14px;line-height:20px;color:var(--dsw-alias-label-primary)}
 .dsh-notifier-description{margin-top:4px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-secondary)}
+.dsh-notifier-status{margin-top:2px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary)}
+.dsh-notifier-status.offline{color:var(--dsw-alias-state-warn-primary)}
 .dsh-notifier-action{flex:none;font-family:inherit;font-size:13px;line-height:18px;padding:6px 12px;border-radius:6px;border:1px solid var(--dsw-alias-border-l2);color:var(--dsw-alias-brand-primary);background:transparent;cursor:pointer}
 .dsh-notifier-action:hover{background:color-mix(in srgb, var(--dsw-alias-brand-primary) 8%, transparent)}
 `
@@ -117,6 +123,7 @@ window.__ModuleLoader__.load({
       const body = {
         client: clientId(),
         permission: permission(),
+        stream: state.channelOpen,
         visible: document.visibilityState === 'visible',
         focused: document.hasFocus(),
         currentSessionId: state.currentSessionId,
@@ -269,8 +276,9 @@ window.__ModuleLoader__.load({
       if (permission() === 'default') await requestPermission()
       if (permission() !== 'granted') return
       const posted = await postJson('/dsh-notifier/test', {})
-      if (!posted || !posted.ok) {
-        // The Host could not be reached; still prove the browser channel works.
+      if (!posted || !posted.ok || !state.channelOpen) {
+        // The Host could not be reached, or its stream is down, so no broadcast
+        // will arrive; prove the browser channel locally instead.
         showNotification(
           {
             kind: 'test',
@@ -293,10 +301,13 @@ window.__ModuleLoader__.load({
       }
       const onHello = () => {
         state.channelOpen = true
+        bump()
         reportState()
       }
       const onError = () => {
         state.channelOpen = false
+        bump()
+        reportState()
       }
       const onNotification = (event) => {
         let notice
@@ -376,6 +387,15 @@ window.__ModuleLoader__.load({
           { className: 'dsh-notifier-text' },
           h('div', { className: 'dsh-notifier-title' }, state.t('settings.title')),
           h('div', { className: 'dsh-notifier-description' }, description),
+          h(
+            'div',
+            {
+              className: `dsh-notifier-status${state.channelOpen ? '' : ' offline'}`,
+            },
+            state.t(
+              state.channelOpen ? 'settings.channel.online' : 'settings.channel.offline',
+            ),
+          ),
         ),
         action
           ? h(

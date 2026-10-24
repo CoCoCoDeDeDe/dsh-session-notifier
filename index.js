@@ -186,7 +186,7 @@ function readJson(req, limit = 8192) {
 
 export function apply(ctx, rawConfig) {
   const config = normalizeConfig(rawConfig)
-  /** @type {Map<string, { res?: import('node:http').ServerResponse, permission: string, visible: boolean, focused: boolean, currentSessionId?: string, seenAt: number }>} */
+  /** @type {Map<string, { res?: import('node:http').ServerResponse, permission: string, stream?: boolean, visible: boolean, focused: boolean, currentSessionId?: string, seenAt: number }>} */
   const clients = new Map()
   const running = new Set()
   const recentErrorAt = new Map()
@@ -194,6 +194,7 @@ export function apply(ctx, rawConfig) {
   let spawnWarned = false
   let toastAppIdReady = false
   let toastAppIdPromise
+  let lastTestAt = 0
 
   const origin = () => {
     try {
@@ -263,7 +264,10 @@ export function apply(ctx, rawConfig) {
   function browserChannelAvailable() {
     const now = Date.now()
     for (const client of clients.values()) {
-      if (client.permission === 'granted' && now - client.seenAt < CLIENT_STALE_MS) return true
+      // A page whose stream is down cannot show a browser notification even
+      // though it still holds permission, so it must not mask the toast.
+      if (client.permission !== 'granted' || client.stream === false) continue
+      if (now - client.seenAt < CLIENT_STALE_MS) return true
     }
     return false
   }
@@ -279,6 +283,7 @@ export function apply(ctx, rawConfig) {
     let winner
     for (const client of clients.values()) {
       if (!client.visible || !client.focused || !client.currentSessionId) continue
+      if (client.stream === false) continue
       if (now - client.seenAt >= CLIENT_STALE_MS) continue
       if (!winner || client.seenAt > winner.seenAt) winner = client
     }
@@ -519,6 +524,9 @@ export function apply(ctx, rawConfig) {
     }
     client.visible = body.visible === true
     client.focused = body.focused === true
+    // Older clients never report this; only an explicit boolean replaces the
+    // derived state, so an absent field keeps meaning "assume the stream is up".
+    if (typeof body.stream === 'boolean') client.stream = body.stream
     client.currentSessionId =
       typeof body.currentSessionId === 'string' && body.currentSessionId
         ? body.currentSessionId
@@ -547,6 +555,7 @@ export function apply(ctx, rawConfig) {
     clients.set(clientId, {
       res,
       permission: previous ? previous.permission : 'unknown',
+      stream: true,
       visible: previous ? previous.visible : false,
       focused: previous ? previous.focused : false,
       currentSessionId: previous ? previous.currentSessionId : undefined,
@@ -580,6 +589,7 @@ export function apply(ctx, rawConfig) {
         return
       }
       if (url.pathname === `${ROUTE_PREFIX}/test` && req.method === 'POST') {
+        lastTestAt = Date.now()
         const body = await readJson(req)
         const kind =
           body && typeof body.kind === 'string' && NOTICE_KINDS.includes(body.kind)
@@ -604,6 +614,7 @@ export function apply(ctx, rawConfig) {
             clients: clients.size,
             browserChannel: browserChannelAvailable(),
             toast: config.windowsToast.enabled,
+            lastTestAt,
             running: running.size,
             recent: recentNoticeAt.size,
             watching: [...clients.values()]
@@ -611,6 +622,7 @@ export function apply(ctx, rawConfig) {
               .map((client) => client.currentSessionId),
             clientsDetail: [...clients.values()].map((client) => ({
               permission: client.permission,
+              stream: client.stream !== false,
               visible: client.visible,
               focused: client.focused,
               current: client.currentSessionId,

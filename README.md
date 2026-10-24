@@ -5,10 +5,12 @@
 
 给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）Web 会话加桌面通知：**会话完成、执行失败、需要审批、需要你回答**时提醒你。
 
-- **浏览器通知**：页面开着时由客户端弹出；点击通知时，如果已有标签页打开该会话就聚焦它，没有才新开一个标签页并定位到该会话。
-- **Windows Toast**：在 WSL/Windows 下由 Host 直接调用 `powershell.exe` 弹出，页面关掉也能收到。
+- **浏览器通知**：页面开着时由客户端弹出；点击后定位到对应会话——已有标签页打开该会话就聚焦它（不刷新），没有才新开一个标签页。
+- **Windows Toast**：在 WSL/Windows 下由 Host 直接调用 `powershell.exe` 弹出，页面关掉也能收到；点击会新开一个浏览器标签页并定位到对应会话（平台限制：无法聚焦已打开的标签页）。
 
-English: desktop notifications for DSH Web sessions — browser notifications plus Windows toasts from WSL.
+点击后的完整行为见[点击通知的行为](#点击通知的行为)。
+
+English: desktop notifications for DSH Web sessions — browser notifications plus Windows toasts from WSL; clicking a notification opens its session.
 
 ## 安装
 
@@ -114,6 +116,19 @@ curl -s -X POST http://127.0.0.1:3080/dsh-notifier/test \
 # 观察 SSE 广播
 curl -sN 'http://127.0.0.1:3080/dsh-notifier/events?client=probe'
 ```
+
+## 点击通知的行为
+
+| 场景 | 点击后 |
+| --- | --- |
+| 浏览器通知，已有标签页打开该会话 | 聚焦该标签页，不刷新、不重新加载 |
+| 浏览器通知，没有标签页打开该会话 | 新开标签页并以 `?dsh-session=<id>` 定位到该会话 |
+| 浏览器通知，当前页就是该会话 | 聚焦当前页 |
+| 浏览器通知，没有会话 id（全局通知） | 只聚焦当前页 |
+| Windows Toast | 新开标签页并定位到对应会话；无法聚焦已打开的标签页 |
+| 目标会话已删除或无法打开 | 停留在当前视图（新标签页打开 DSH 首页） |
+
+新标签页定位完成后会把 `dsh-session` 参数从地址栏移除，之后刷新不会重复跳转。Toast 的打开地址可以用配置里的 `windowsToast.launchUrl` 覆盖。
 
 ## 已知限制
 

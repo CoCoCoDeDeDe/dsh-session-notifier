@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-notifier",
-  "version": "1.0.2",
-  "description": "Desktop notifications for DSH Web sessions: browser notifications plus Windows toasts from WSL when a session finishes, fails, needs an approval, or asks a question.",
+  "version": "1.0.3",
+  "description": "Desktop notifications for DSH Web sessions: browser notifications plus Windows toasts from WSL when a session finishes, fails, needs an approval, or asks a question. Clicking one opens its session; browser notifications focus an open tab, Windows toasts open a new tab.",
   "type": "module",
   "license": "MIT",
   "author": "CoCoCoDeDeDe",
