@@ -5,7 +5,7 @@
 
 给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）Web 会话加桌面通知：**会话完成、执行失败、需要审批、需要你回答**时提醒你。
 
-- **浏览器通知**：页面开着时由客户端弹出；点击通知切回 DSH 并打开对应会话。
+- **浏览器通知**：页面开着时由客户端弹出；点击通知时，如果已有标签页打开该会话就聚焦它，没有才新开一个标签页并定位到该会话。
 - **Windows Toast**：在 WSL/Windows 下由 Host 直接调用 `powershell.exe` 弹出，页面关掉也能收到。
 
 English: desktop notifications for DSH Web sessions — browser notifications plus Windows toasts from WSL.
@@ -47,8 +47,8 @@ dsh plugin --profile web add "link:$PWD"
 客户端通过 SSE（`/dsh-notifier/events`）接收通知，并上报浏览器通知权限与当前正在浏览的会话。Host 的
 `windowsToast.enabled` 决定是否同时弹 Windows Toast：
 
-- `always`（默认）：每条通知同时弹 Windows Toast，即使浏览器通知已启用。最可靠——浏览器通知被系统静默时也不会漏。
-- `auto`：至少一个页面已授予通知权限时不弹 Toast，否则弹。浏览器通知正常显示时可避免重复。
+- `auto`（默认）：有页面已授予通知权限时只发浏览器通知，避免重复；没有可用页面时回退到 Windows Toast。
+- `always`：每条通知同时弹 Windows Toast，最可靠，但会与浏览器通知重复。
 - `never`：从不弹 Toast。
 
 **被关注会话**：同时只看一个页面、一个会话。聚焦且可见的页面上报的当前会话即被关注会话。
@@ -82,9 +82,9 @@ dsh plugin --profile web add "link:$PWD"
       approval: true
       question: true
     windowsToast:
-      enabled: always        # always | auto | never（也接受 true/false）
+      enabled: auto          # auto | always | never（也接受 true/false）
       sound: true
-      appId: Microsoft.Windows.Shell.RunDialog
+      appId: DSH.Web
       # launchUrl: http://127.0.0.1:3080/
     browser:
       enabled: true
@@ -117,8 +117,8 @@ curl -sN 'http://127.0.0.1:3080/dsh-notifier/events?client=probe'
 
 - **需要浏览器进程在运行才能收到浏览器通知**；页面全部关掉后由 Windows Toast 接管（仅 Windows/WSL）。
 - SSE 路由只校验回环 Host/Origin，没有额外鉴权；DSH Web 只监听 `127.0.0.1` 时风险可接受。
-- Windows Toast 通过 `Microsoft.Windows.Shell.RunDialog` AppID 显示，通知来源显示为 Windows PowerShell。若希望显示为独立应用，需要额外注册一个 AUMID（未做，避免修改系统状态）。
-- Toast 点击会打开 DSH 首页；Web 端会话选择不走 URL，无法深链到具体会话。
+- Windows Toast 使用 `DSH.Web` 作为 AppID，插件首次发送时会在 `HKCU\SOFTWARE\Classes\AppUserModelId\DSH.Web` 写入显示名 `DSH Web`（用户级注册表，幂等，不需要管理员权限）。想换名称可改配置里的 `appId`。
+- Toast 点击会新开一个浏览器标签页并直接定位到对应会话（`?dsh-session=<id>`）。Windows 协议激活无法聚焦已经打开的标签页，这是平台限制；浏览器通知的点击则优先聚焦已有标签页。
 - 审批/提问通知依赖 Host 的 `approval/request`、`user-questions/request` 事件；在审批策略为 `never` 时不会触发审批通知。
 - 子代理会话默认被过滤，主会话完成时会统一通知。
 

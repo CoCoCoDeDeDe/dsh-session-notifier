@@ -52,9 +52,7 @@ function normalizeConfig(raw) {
       enabled: toastMode,
       command: typeof toast.command === 'string' && toast.command ? toast.command : 'powershell.exe',
       appId:
-        typeof toast.appId === 'string' && toast.appId
-          ? toast.appId
-          : 'Microsoft.Windows.Shell.RunDialog',
+        typeof toast.appId === 'string' && toast.appId ? toast.appId : 'DSH.Web',
       sound: toast.sound !== false,
       launchUrl: typeof toast.launchUrl === 'string' ? toast.launchUrl : '',
     },
@@ -189,6 +187,8 @@ export function apply(ctx, rawConfig) {
   const recentErrorAt = new Map()
   const recentNoticeAt = new Map()
   let spawnWarned = false
+  let toastAppIdReady = false
+  let toastAppIdPromise
 
   const origin = () => {
     try {
@@ -269,11 +269,79 @@ export function apply(ctx, rawConfig) {
     return !browserChannelAvailable()
   }
 
+  /**
+   * Register the toast sender under HKCU so Windows shows "DSH Web" instead of
+   * the generic "Run" app name. The write is user-scoped and idempotent.
+   */
+  function toastAppIdScript(appId) {
+    const key = `HKCU:\\SOFTWARE\\Classes\\AppUserModelId\\${appId}`
+    return [
+      "$ErrorActionPreference = 'Stop'",
+      `$key = ${psString(key)}`,
+      'New-Item -Path $key -Force | Out-Null',
+      `Set-ItemProperty -Path $key -Name DisplayName -Value ${psString('DSH Web')}`,
+    ].join('\n')
+  }
+
+  function ensureToastAppId() {
+    if (!config.windowsToast.appId || config.windowsToast.appId === 'Microsoft.Windows.Shell.RunDialog') {
+      return Promise.resolve()
+    }
+    if (toastAppIdReady) return Promise.resolve()
+    if (toastAppIdPromise) return toastAppIdPromise
+    toastAppIdPromise = new Promise((resolve) => {
+      const encoded = Buffer.from(
+        toastAppIdScript(config.windowsToast.appId),
+        'utf16le',
+      ).toString('base64')
+      let child
+      try {
+        child = spawn(
+          config.windowsToast.command,
+          ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-EncodedCommand', encoded],
+          { stdio: 'ignore', windowsHide: true },
+        )
+      } catch (error) {
+        warnSpawn(error)
+        toastAppIdReady = true
+        resolve()
+        return
+      }
+      let settled = false
+      const done = () => {
+        if (settled) return
+        settled = true
+        toastAppIdReady = true
+        resolve()
+      }
+      child.on('error', (error) => {
+        warnSpawn(error)
+        done()
+      })
+      child.on('exit', done)
+      const timer = setTimeout(done, 5000)
+      if (typeof timer.unref === 'function') timer.unref()
+      child.unref()
+    })
+    return toastAppIdPromise
+  }
+
   function raiseToast(notice) {
+    void ensureToastAppId().then(() => spawnToast(notice))
+  }
+
+  function spawnToast(notice) {
     const title =
       notice.title && notice.title !== 'DSH' ? `DSH · ${notice.title}` : 'DSH'
     const body = notice.body || ''
-    const launch = config.windowsToast.launchUrl || origin() || 'http://127.0.0.1:3080/'
+    const base = origin() || 'http://127.0.0.1:3080'
+    // A toast click opens the browser; carry the session so the new tab lands on
+    // it. Only a page click can focus an already-open tab.
+    const launch =
+      config.windowsToast.launchUrl ||
+      (notice.sessionId
+        ? `${base}/?dsh-session=${encodeURIComponent(notice.sessionId)}`
+        : `${base}/`)
     const script = toastScript(
       title,
       body,

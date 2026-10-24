@@ -61,6 +61,7 @@ window.__ModuleLoader__.load({
       t: (key) => key,
       channelOpen: false,
       currentSessionId: undefined,
+      channel: null,
       listeners: new Set(),
     }
 
@@ -121,6 +122,97 @@ window.__ModuleLoader__.load({
       void postJson('/dsh-notifier/client-state', body)
     }
 
+    function openSessionUrl(sessionId) {
+      const url = new URL('/', window.location.origin)
+      url.searchParams.set('dsh-session', sessionId)
+      return url.toString()
+    }
+
+    /**
+     * Focus the tab already showing `sessionId`; open one only when no tab does.
+     * A BroadcastChannel probe avoids reloading an existing tab just to focus it.
+     */
+    function focusSession(sessionId) {
+      if (!sessionId) {
+        try {
+          window.focus()
+        } catch {
+          // Some browsers ignore focus requests.
+        }
+        return
+      }
+      if (state.currentSessionId === sessionId) {
+        try {
+          window.focus()
+        } catch {
+          // Already on this session.
+        }
+        return
+      }
+      const target = openSessionUrl(sessionId)
+      const openNew = () => {
+        try {
+          window.open(target, '_blank', 'noopener')
+        } catch {
+          window.location.assign(target)
+        }
+      }
+      const channel = state.channel
+      if (!channel) {
+        openNew()
+        return
+      }
+      let found = false
+      const onMessage = (event) => {
+        const message = event.data
+        if (!message || message.type !== 'here' || message.sessionId !== sessionId) return
+        found = true
+        channel.removeEventListener('message', onMessage)
+        // A named window exists; this call inherits the notification click gesture.
+        try {
+          window.open('', `dsh-session-${sessionId}`)
+        } catch {
+          // The window may have closed between probe and focus.
+        }
+      }
+      channel.addEventListener('message', onMessage)
+      channel.postMessage({ type: 'probe', sessionId })
+      window.setTimeout(() => {
+        channel.removeEventListener('message', onMessage)
+        if (!found) openNew()
+      }, 150)
+    }
+
+    /**
+     * A tab opened from a toast or notification carries `?dsh-session=<id>`;
+     * open that session once the workspace service is ready, then drop the
+     * parameter so a refresh stays on the current view.
+     */
+    function openSessionFromUrl() {
+      let sessionId
+      try {
+        const url = new URL(window.location.href)
+        sessionId = url.searchParams.get('dsh-session')
+        if (!sessionId) return
+        url.searchParams.delete('dsh-session')
+        window.history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`)
+      } catch {
+        return
+      }
+      const attempt = (remaining) => {
+        if (!state.ctx || !state.ctx.uiWorkspace) {
+          if (remaining > 0) window.setTimeout(() => attempt(remaining - 1), 100)
+          return
+        }
+        try {
+          state.ctx.uiWorkspace.openSession(sessionId)
+        } catch {
+          // A stale or pruned session simply stays on the current view.
+        }
+      }
+      window.setTimeout(() => attempt(20), 0)
+    }
+
     function showNotification(notice, force) {
       if (typeof Notification === 'undefined') return
       if (Notification.permission !== 'granted') return
@@ -140,18 +232,7 @@ window.__ModuleLoader__.load({
           requireInteraction: notice.kind === 'approval' || notice.kind === 'question',
         })
         notification.onclick = () => {
-          try {
-            window.focus()
-          } catch {
-            // Some browsers ignore focus requests.
-          }
-          if (notice.sessionId && state.ctx && state.ctx.uiWorkspace) {
-            try {
-              state.ctx.uiWorkspace.openSession(notice.sessionId)
-            } catch {
-              // Opening a pruned session is best effort.
-            }
-          }
+          focusSession(notice.sessionId)
           try {
             notification.close()
           } catch {
@@ -244,6 +325,11 @@ window.__ModuleLoader__.load({
       const sessionId = props && props.sessionId ? String(props.sessionId) : undefined
       useEffect(() => {
         state.currentSessionId = sessionId
+        try {
+          window.name = sessionId ? `dsh-session-${sessionId}` : ''
+        } catch {
+          // window.name may be unavailable in exotic embedding contexts.
+        }
         reportState()
         return () => {
           if (state.currentSessionId === sessionId) {
@@ -301,6 +387,36 @@ window.__ModuleLoader__.load({
 
         ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'dsh-notifier: dictionaries')
         ctx.effect(() => startChannel(), 'dsh-notifier: sse channel')
+
+        ctx.effect(() => {
+          if (typeof BroadcastChannel === 'undefined') return () => {}
+          let channel
+          try {
+            channel = new BroadcastChannel('dsh-notifier-focus')
+          } catch {
+            return () => {}
+          }
+          state.channel = channel
+          const onMessage = (event) => {
+            const message = event.data
+            if (!message || typeof message !== 'object') return
+            if (message.type === 'probe' && message.sessionId === state.currentSessionId) {
+              channel.postMessage({ type: 'here', sessionId: message.sessionId })
+            }
+          }
+          channel.addEventListener('message', onMessage)
+          return () => {
+            channel.removeEventListener('message', onMessage)
+            if (state.channel === channel) state.channel = null
+            try {
+              channel.close()
+            } catch {
+              // Already closed.
+            }
+          }
+        }, 'dsh-notifier: focus channel')
+
+        openSessionFromUrl()
 
         ctx.effect(() => {
           const onVisibility = () => reportState()

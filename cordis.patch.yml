@@ -11,12 +11,13 @@
           approval: true
           question: true
         windowsToast:
-          # always: every non-attended notice also raises a Windows toast, so a
-          # browser-silenced notification can never swallow an alert.
-          # auto: toast only when no page reports a granted Notification permission.
-          # never is also accepted.
-          enabled: always
+          # auto: a page with granted Notification permission shows the browser
+          # notification, so no duplicate toast is raised; toast is the fallback.
+          # always | never are also accepted.
+          enabled: auto
           sound: true
+          # Registered under HKCU so Windows shows "DSH Web" as the source.
+          appId: DSH.Web
         browser:
           enabled: true
         debounceMs: 4000

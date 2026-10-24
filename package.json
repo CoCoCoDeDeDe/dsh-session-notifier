@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-notifier",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Desktop notifications for DSH Web sessions: browser notifications plus Windows toasts from WSL when a session finishes, fails, needs an approval, or asks a question.",
   "type": "module",
   "license": "MIT",
