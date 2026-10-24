@@ -1,0 +1,24 @@
+# Desktop notifications for DSH Web sessions.
+# Host half: listens to agent events, streams them to the page, and raises
+# Windows toasts from WSL. Client half: browser notifications and a settings row.
+- insert:
+    - id: dsh-notifier
+      name: dsh-session-notifier
+      config:
+        events:
+          completed: true
+          error: true
+          approval: true
+          question: true
+        windowsToast:
+          # always: every non-attended notice also raises a Windows toast, so a
+          # browser-silenced notification can never swallow an alert.
+          # auto: toast only when no page reports a granted Notification permission.
+          # never is also accepted.
+          enabled: always
+          sound: true
+        browser:
+          enabled: true
+        debounceMs: 4000
+        # Also notify for subagent/teammate sessions (default: only top-level sessions).
+        includeSubagents: false

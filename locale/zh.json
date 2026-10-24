@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "桌面通知",
+    "description": "会话完成、失败、需要审批或需要你回答时，发送浏览器通知，并在 WSL 下通过 Windows Toast 提醒。"
+  }
+}

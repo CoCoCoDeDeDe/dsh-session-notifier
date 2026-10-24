@@ -1,0 +1,6 @@
+{
+  "meta": {
+    "title": "Desktop Notifier",
+    "description": "Sends a browser notification and a Windows toast when a session finishes, fails, needs an approval, or asks you a question."
+  }
+}

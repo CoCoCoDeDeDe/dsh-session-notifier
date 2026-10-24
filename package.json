@@ -1,0 +1,54 @@
+{
+  "name": "dsh-session-notifier",
+  "version": "1.0.0",
+  "description": "Desktop notifications for DSH Web sessions: browser notifications plus Windows toasts from WSL when a session finishes, fails, needs an approval, or asks a question.",
+  "type": "module",
+  "license": "MIT",
+  "author": "CoCoCoDeDeDe",
+  "homepage": "https://github.com/CoCoCoDeDeDe/dsh-session-notifier#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/CoCoCoDeDeDe/dsh-session-notifier.git"
+  },
+  "bugs": {
+    "url": "https://github.com/CoCoCoDeDeDe/dsh-session-notifier/issues"
+  },
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "notifications",
+    "desktop-notification",
+    "windows-toast",
+    "wsl",
+    "session"
+  ],
+  "engines": {
+    "dsh": ">=0.2.1-rc.2 <0.3.0-0",
+    "node": ">=20"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true
+    }
+  }
+}

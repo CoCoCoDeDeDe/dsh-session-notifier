@@ -1,0 +1,127 @@
+# dsh-session-notifier
+
+[![npm version](https://img.shields.io/npm/v/dsh-session-notifier.svg)](https://www.npmjs.com/package/dsh-session-notifier)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+
+给 [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)（`dsh`）Web 会话加桌面通知：**会话完成、执行失败、需要审批、需要你回答**时提醒你。
+
+- **浏览器通知**：页面开着时由客户端弹出；点击通知切回 DSH 并打开对应会话。
+- **Windows Toast**：在 WSL/Windows 下由 Host 直接调用 `powershell.exe` 弹出，页面关掉也能收到。
+
+English: desktop notifications for DSH Web sessions — browser notifications plus Windows toasts from WSL.
+
+## 安装
+
+```bash
+dsh plugin --profile web add dsh-session-notifier
+```
+
+然后：
+
+1. 重启 `dsh web`（profile 的 bundle 列表只在启动时读取）；
+2. 浏览器**硬刷新**（`Ctrl+Shift+R`）；
+3. 首次点击 DSH 页面任意位置，允许浏览器通知权限。
+
+也可以在 **设置 → 通用 → 桌面通知** 中查看权限状态、启用通知或发送测试通知。
+
+从源码安装（本地开发）：
+
+```bash
+cd /path/to/dsh-session-notifier
+dsh plugin --profile web add "link:$PWD"
+```
+
+## 触发事件
+
+| 事件 | 来源 | 通知内容 |
+| --- | --- | --- |
+| 回合完成 | `agent/status` 从 `running` 变为 `idle` | `任务已完成 · <目录>` |
+| 执行失败 | `agent/error` | `执行失败：<错误> · <目录>` |
+| 需要审批 | `approval/request` | `需要审批：<工具>（<原因>） · <目录>` |
+| 需要回答 | `user-questions/request` | `需要你回答：<问题> · <目录>` |
+
+通知标题使用会话标题（`sessionTitle` 投影），无标题时回退到工作目录名或会话 id 前 8 位。子代理会话默认不通知。
+
+## 通道与关注会话
+
+客户端通过 SSE（`/dsh-notifier/events`）接收通知，并上报浏览器通知权限与当前正在浏览的会话。Host 的
+`windowsToast.enabled` 决定是否同时弹 Windows Toast：
+
+- `always`（默认）：每条通知同时弹 Windows Toast，即使浏览器通知已启用。最可靠——浏览器通知被系统静默时也不会漏。
+- `auto`：至少一个页面已授予通知权限时不弹 Toast，否则弹。浏览器通知正常显示时可避免重复。
+- `never`：从不弹 Toast。
+
+**被关注会话**：同时只看一个页面、一个会话。聚焦且可见的页面上报的当前会话即被关注会话。
+
+- 被关注会话的**完成**通知会被抑制（页面本身已经能看到结果），且对所有页面一致抑制。
+- 其他会话的完成——同一页面的其他会话、其他标签页/窗口的会话——都会通知。
+- 失败、审批、提问即使发生在被关注会话也会通知（这些需要行动）。
+- 页面失焦、最小化或关闭时，所有完成都会通知；没有页面连接时由 Windows Toast 接管。
+
+## 环境要求
+
+| 要求 | 说明 |
+| --- | --- |
+| DSH | `>=0.2.1-rc.2 <0.3.0-0` |
+| Node.js | `>=20` |
+| 浏览器 | Chrome / Edge（通知授权依赖用户手势） |
+| Windows Toast | Windows 或 WSL，PATH 中有 `powershell.exe`；其他平台只用浏览器通知 |
+
+## 配置
+
+默认配置在包内的 `cordis.patch.yml`。要覆盖，在本 profile 的用户 patch 层
+（`~/.dsh/profiles/web/cordis.patch.yml`）加一条同 id 的配置；匹配的覆盖会替换整个 `config`：
+
+```yaml
+- id: dsh-notifier
+  name: dsh-session-notifier
+  config:
+    events:
+      completed: true
+      error: true
+      approval: true
+      question: true
+    windowsToast:
+      enabled: always        # always | auto | never（也接受 true/false）
+      sound: true
+      appId: Microsoft.Windows.Shell.RunDialog
+      # launchUrl: http://127.0.0.1:3080/
+    browser:
+      enabled: true
+    debounceMs: 4000
+    includeSubagents: false   # true 时子代理/子会话也通知
+```
+
+改完后由 HMR 重载配置；如果没生效，刷新页面或重启 DSH。
+
+## 验证
+
+```bash
+# 通道状态（客户端数、浏览器通道是否可用、Toast 模式、被关注会话）
+curl -s http://127.0.0.1:3080/dsh-notifier/state
+
+# 发送一条测试通知：浏览器通知 + Windows Toast
+curl -s -X POST http://127.0.0.1:3080/dsh-notifier/test -H 'content-type: application/json' -d '{}'
+
+# 模拟某个会话的事件（用于验证关注会话抑制）
+curl -s -X POST http://127.0.0.1:3080/dsh-notifier/test \
+  -H 'content-type: application/json' \
+  -d '{"kind":"completed","sessionId":"session-other"}'
+# kind 可为 completed / error / approval / question / test
+
+# 观察 SSE 广播
+curl -sN 'http://127.0.0.1:3080/dsh-notifier/events?client=probe'
+```
+
+## 已知限制
+
+- **需要浏览器进程在运行才能收到浏览器通知**；页面全部关掉后由 Windows Toast 接管（仅 Windows/WSL）。
+- SSE 路由只校验回环 Host/Origin，没有额外鉴权；DSH Web 只监听 `127.0.0.1` 时风险可接受。
+- Windows Toast 通过 `Microsoft.Windows.Shell.RunDialog` AppID 显示，通知来源显示为 Windows PowerShell。若希望显示为独立应用，需要额外注册一个 AUMID（未做，避免修改系统状态）。
+- Toast 点击会打开 DSH 首页；Web 端会话选择不走 URL，无法深链到具体会话。
+- 审批/提问通知依赖 Host 的 `approval/request`、`user-questions/request` 事件；在审批策略为 `never` 时不会触发审批通知。
+- 子代理会话默认被过滤，主会话完成时会统一通知。
+
+## License
+
+[MIT](LICENSE)
