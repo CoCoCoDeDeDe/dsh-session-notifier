@@ -1,0 +1,14 @@
+# Submission entry for https://github.com/awesome-dsh-plugin/awesome-dsh-plugin
+#
+# Add this file as data/plugins/CoCoCoDeDeDe__dsh-session-notifier.yml and open
+# a pull request. The target repository must be at least one day old and carry
+# the `dsh-plugin` topic (both are already true for this repo once the day
+# passes). The icon field is intentionally omitted: awesome-dsh-plugin accepts
+# only GitHub-hosted raster images (PNG/JPEG/WebP), and this plugin ships SVG.
+
+url: https://github.com/CoCoCoDeDeDe/dsh-session-notifier
+name: CoCoCoDeDeDe/dsh-session-notifier
+category: notify
+description:
+  en: Desktop notifications for DSH Web sessions: browser notifications plus Windows toast when a session finishes, fails, needs an approval, or asks a question.
+  zh: 为 DSH Web 会话提供桌面通知：会话完成、失败、需要审批或提问时发送浏览器通知，在 Windows/WSL 下同时弹出系统 Toast。
