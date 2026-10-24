@@ -7,7 +7,7 @@
  */
 
 window.__ModuleLoader__.load({
-  id: '@local/dsh-notifier',
+  id: 'dsh-session-notifier',
   factory(require) {
     const React = require('react')
     const h = React.createElement
